@@ -1,0 +1,231 @@
+#FROM docker.io/library/ubuntu:devel AS systemd
+#FROM docker.io/library/ubuntu:24.04 AS systemd
+FROM docker.io/library/ubuntu:22.04 AS systemd
+LABEL maintainer="brett.dellegrazie@gmail.com"
+
+
+### set argument with default value
+### deb proxy
+ARG HTTP_PROXY="http://10.0.2.2:8000"
+### proxy for deb files
+# TODO use vagrant-cachier instead
+#RUN echo "Acquire::http::Proxy "\""${HTTP_PROXY}"\"";" \
+#  | tee  /etc/apt/apt.conf.d/01deb-proxy
+
+
+ENV DEBIAN_FRONTEND noninteractive
+
+ENV container=docker LANG=C.UTF-8
+ENV TZ=America/Mexico_City
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# Enable all repositories
+RUN sed -i 's/# deb/deb/g' /etc/apt/sources.list
+
+    ### NOTE unminimize must be the first thing  you install,
+    ### otherwise libc fails to install during unminimize...
+RUN apt-get update --yes && \
+    yes | unminimize && \
+    apt-get install --no-install-recommends -y \
+    dbus systemd systemd-cron rsyslog iproute2 python3 python3-apt sudo bash ca-certificates && \
+    apt-get clean && \
+    rm -rf /usr/share/doc/* /usr/share/man/* /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+RUN sed -i 's/^\(module(load="imklog")\)/#\1/' /etc/rsyslog.conf
+
+  ## Enable systemd (from Matthew Warman's mcwarman/vagrant-provider)
+  #RUN (cd /lib/systemd/system/sysinit.target.wants/; for i in *; do [ $i == systemd-tmpfiles-setup.service ] || rm -f $i; done); \
+  #    rm -f /lib/systemd/system/multi-user.target.wants/*; \
+  #    rm -f /etc/systemd/system/*.wants/*; \
+  #    rm -f /lib/systemd/system/local-fs.target.wants/*; \
+  #    rm -f /lib/systemd/system/sockets.target.wants/*udev*; \
+  #    rm -f /lib/systemd/system/sockets.target.wants/*initctl*; \
+  #    rm -f /lib/systemd/system/basic.target.wants/*; \
+  #    rm -f /lib/systemd/system/anaconda.target.wants/*;
+
+# Don't start any optional services except for the few we need.
+RUN find /etc/systemd/system \
+    /lib/systemd/system \
+    -path '*.wants/*' \
+    -not -name '*dbus*' \
+    -not -name '*journald*' \
+    -not -name '*systemd-tmpfiles*' \
+    -not -name '*systemd-user-sessions*' \
+    -exec rm \{} \;
+
+RUN systemctl set-default multi-user.target
+RUN systemctl mask dev-hugepages.mount sys-fs-fuse-connections.mount
+
+VOLUME ["/sys/fs/cgroup", "/tmp", "/run", "/run/lock"]
+STOPSIGNAL SIGRTMIN+3
+
+#CMD ["/usr/sbin/init"]
+CMD ["/sbin/init", "--log-target=journal"]
+
+
+
+#NOTE FROM systemd AS sshd
+FROM systemd AS sshd
+
+# Install packages needed for SSH and interactive OS
+RUN apt-get update --yes && \
+    apt-get -y install \
+        openssh-server \
+        passwd \
+        sudo \
+        man-db \
+        curl \
+        wget \
+        vim-tiny \
+        ;
+
+RUN apt-get install --yes --no-install-recommends \
+  ssh \
+  && \
+  apt-get -qq clean && \
+  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Enable ssh for vagrant
+RUN systemctl enable ssh.service;
+
+RUN sed -i -e 's/Defaults.*requiretty/#&/' /etc/sudoers
+RUN sed -i -e 's/\(UsePAM \)yes/\1 no/' /etc/ssh/sshd_config
+
+### if threre is no systemd or service
+#RUN mkdir /var/run/sshd
+
+EXPOSE 22
+
+
+
+#NOTE FROM  sshd AS vagrant
+FROM  sshd AS vagrant
+
+ARG USER=vagrant
+
+# Create the vagrant user
+  ### NOTE if linux
+RUN useradd --uid '1000' --create-home -s /bin/bash $USER \
+  && echo -n "$USER:$USER" | chpasswd
+  ### NOTE if Windows
+### TODO make PROJECT dir and bindfs '/vagrant' dir to it to adapt owner permissions for compatibility with windows and linux both
+#RUN useradd --uid '2000' --create-home -s /bin/bash $USER \
+#  && echo -n "$USER:$USER" | chpasswd
+
+### add user 'vagrant' to group 'sudo'
+RUN usermod --append --groups sudo $USER
+RUN mkdir -p /etc/sudoers.d \
+  && echo "$USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/$USER \
+  && chmod 0440 /etc/sudoers.d/$USER
+
+# Establish ssh keys for vagrant
+RUN mkdir -p /home/$USER/.ssh \
+  && chmod 700 /home/$USER/.ssh
+###  This default 'insecure' key will be automatically replaced later when you initialize your virtual environment
+RUN echo "ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEA6NF8iallvQVp22WDkTkyrtvp9eWW6A8YVr+kz4TjGYe7gHzIw+niNltGEFHzD8+v1I2YJ6oXevct1YeS0o9HZyN1Q9qgCgzUFtdOKLv6IedplqoPkcmF0aYet2PkEDo3MlTBckFXPITAMzF8dJSIFo9D8HfdOV0IAdx4O7PtixWKn5y2hMNG0zQPyUecp4pzC6kivAIhyfHilFR61RGL+GPXQ2MWZWFYbAGjyiYJnAmCP3NOTd0jMZEnDkbUvxhMmBYSdETk1rRgm+R4LOzFUGaHqHDLKLX+FIPKcF96hrucXzcWyLbIbEgE98OHlnVYCzRdK8jlqm8tehUc9c9WhQ==" > /home/$USER/.ssh/authorized_keys
+#ADD https://raw.githubusercontent.com/hashicorp/vagrant/master/keys/vagrant.pub /home/vagrant/.ssh/authorized_keys
+RUN chmod 600 /home/$USER/.ssh/authorized_keys; \
+    chown -R $USER:$USER /home/$USER/.ssh
+
+
+
+#NOTE FROM vagrant AS docker
+FROM vagrant AS docker
+### set argument with default value
+#ARG DOCKER_GID=121
+ARG DOCKER_GID
+#ARG USER="vagrant"
+#USER root
+
+RUN echo "$DOCKER_GID"
+RUN echo "$USER"
+RUN groupadd --system --gid $DOCKER_GID docker \
+  && usermod --append --groups docker $USER
+
+
+RUN apt-get update --yes && \
+  apt-get install --yes \
+    docker.io \
+    docker-buildx \
+    docker-compose-v2 \
+    \
+    docker-compose \
+    inotify-tools \
+    curl \
+  && \
+  apt-get -qq clean && \
+  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# TODO test
+
+### add vagrant user to docker group
+#RUN delgroup ping
+#RUN delgroup $(grep $DOCKER_GID /etc/group | cut -d: -f1)
+#RUN delgroup docker
+
+### make 'docker' group with GID=host docker socket gid
+### fails on Windows PS
+#RUN groupmod --gid $DOCKER_GID docker \
+#  && usermod --append --groups docker $USER
+    #RUN usermod --append --groups docker $USER
+
+### make 'docker'group
+### make 'docker' group with GID=host docker socket gid
+### fails on Windows PS
+#RUN groupadd --system --gid $DOCKER_GID docker \
+#  && usermod --append --groups docker $USER
+
+
+FROM docker AS python
+### install python3 (for ansible)
+WORKDIR /app
+RUN mkdir ./scripts
+#COPY scripts/python_alt_versions.sh /app/scripts
+RUN apt-get update \
+  && apt-get install --yes 'python3' \
+  && apt-get install --yes "python3"-pip \
+  && "python3" -m pip install --upgrade pip \
+  && apt-get install --yes python-dev-is-python3 \
+  ;
+#  ##&& sh app/scripts/python_alt_versions.sh
+RUN apt-get install --yes \
+  build-essential \
+  curl \
+  git \
+  libssl-dev \
+  libffi-dev \
+  python3-dev \
+  ;
+
+
+FROM python AS ansible
+RUN python3 -m pip install -VVV \
+  ansible \
+  ;
+  ## ansible==9.0.1 \
+RUN echo "$(ansible --version)"
+  #RUN sudo apt update \
+  #  && sudo apt-get install --yes software-properties-common \
+  #  && sudo add-apt-repository --yes --update ppa:ansible/ansible \
+  #  && sudo apt-get install --yes ansible \
+  #  ;
+RUN mkdir /test && chown "${USER}:" /test
+
+
+FROM ansible AS nfs_server
+RUN apt-get update \
+  && apt-get install --yes \
+    nfs-kernel-server nfs-common portmap net-tools
+
+
+FROM nfs_server AS rclone
+RUN apt-get update \
+  && apt-get install --yes \
+    curl \
+    unzip \
+    inotify-tools \
+    libnotify-bin \
+    ;
+RUN curl https://rclone.org/install.sh | sudo bash
+
+RUN echo -n "root:$USER" | chpasswd

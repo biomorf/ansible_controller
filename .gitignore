@@ -1,0 +1,6 @@
+
+*.swp
+
+.vagrant/
+
+ssh_auth_public_keys/

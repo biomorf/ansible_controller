@@ -1,0 +1,9 @@
+---
+### https://docs.ansible.com/ansible/latest/galaxy/user_guide.html
+collections:
+  ### https://github.com/debops/debops/
+- debops.debops
+- robertdebock.roles
+
+#roles:
+#- robertdebock.bootstrap

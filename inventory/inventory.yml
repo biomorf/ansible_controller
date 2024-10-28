@@ -1,0 +1,19 @@
+---
+front:
+  hosts:
+    homelab:
+      #ansible_host: 127.0.0.1
+      ansible_host: 192.168.124.47
+      ### Variables can apply to specific hosts
+      ansible_port: 2222
+      #http_port: 80
+    phonelab:
+      #ansible_host: 127.0.0.1
+      ansible_host: 172.21.0.21
+      ### Variables can apply to specific hosts
+      ansible_port: 22
+      #http_port: 80
+    ### Variables can also apply to all hosts in a group
+    #vars:
+    #  ansible_user: my_server_user
+
