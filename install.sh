@@ -4,4 +4,3 @@
 
 ansible-galaxy install -r requirements/requirements.yml
 
-#ansible-galaxy role install robertdebock.fail2ban
