@@ -198,34 +198,34 @@ RUN apt-get install --yes \
   ;
 
 
-FROM python AS ansible
-RUN python3 -m pip install -VVV \
-  ansible \
-  ;
-  ## ansible==9.0.1 \
-RUN echo "$(ansible --version)"
-  #RUN sudo apt update \
-  #  && sudo apt-get install --yes software-properties-common \
-  #  && sudo add-apt-repository --yes --update ppa:ansible/ansible \
-  #  && sudo apt-get install --yes ansible \
-  #  ;
-RUN mkdir /test && chown "${USER}:" /test
-
-
-FROM ansible AS nfs_server
-RUN apt-get update \
-  && apt-get install --yes \
-    nfs-kernel-server nfs-common portmap net-tools
-
-
-FROM nfs_server AS rclone
-RUN apt-get update \
-  && apt-get install --yes \
-    curl \
-    unzip \
-    inotify-tools \
-    libnotify-bin \
-    ;
-RUN curl https://rclone.org/install.sh | sudo bash
+#FROM python AS ansible
+#RUN python3 -m pip install -VVV \
+#  ansible \
+#  ;
+#  ## ansible==9.0.1 \
+#RUN echo "$(ansible --version)"
+#  #RUN sudo apt update \
+#  #  && sudo apt-get install --yes software-properties-common \
+#  #  && sudo add-apt-repository --yes --update ppa:ansible/ansible \
+#  #  && sudo apt-get install --yes ansible \
+#  #  ;
+#RUN mkdir /test && chown "${USER}:" /test
+#
+#
+#FROM ansible AS nfs_server
+#RUN apt-get update \
+#  && apt-get install --yes \
+#    nfs-kernel-server nfs-common portmap net-tools
+#
+#
+#FROM nfs_server AS rclone
+#RUN apt-get update \
+#  && apt-get install --yes \
+#    curl \
+#    unzip \
+#    inotify-tools \
+#    libnotify-bin \
+#    ;
+#RUN curl https://rclone.org/install.sh | sudo bash
 
 RUN echo -n "root:$USER" | chpasswd
